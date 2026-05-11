@@ -72,7 +72,7 @@ def process_receipt(image_bytes):
     """
     
     response = client.models.generate_content(
-        model="models/gemini-1.5-flash",
+        model="gemini-1.5-flash-latest",
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
             prompt
