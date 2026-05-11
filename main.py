@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import gspread
 import requests
+import base64
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- PAGE CONFIG ---
@@ -58,7 +59,6 @@ def process_receipt(image_bytes):
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
     
     # Encode image to base64
-    import base64
     image_base64 = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
@@ -85,10 +85,7 @@ def process_receipt(image_bytes):
                     }
                 }
             ]
-        }],
-        "generationConfig": {
-            "response_mime_type": "application/json"
-        }
+        }]
     }
     
     headers = {
