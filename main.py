@@ -39,24 +39,26 @@ def init_gspread():
     """Initialize Google Sheets with Service Account from secrets"""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Get the JSON from secrets
     gcp_json = st.secrets["gcp_service_account"]
     
-    # Parse if it's a string
     if isinstance(gcp_json, str):
         creds_dict = json.loads(gcp_json)
     else:
         creds_dict = gcp_json
     
-    # Create credentials
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 def process_receipt(image_bytes):
-    """Send image to Gemini API directly using requests"""
+    """Send image to Gemini API using available model"""
     
     api_key = st.secrets["GEMINI_API_KEY"]
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+    
+    # Use one of the available models from your list
+    # Options: "models/gemini-2.0-flash", "models/gemini-2.5-flash", "models/gemini-2.0-flash-lite"
+    model_name = "models/gemini-2.0-flash"
+    
+    url = f"https://generativelanguage.googleapis.com/v1/{model_name}:generateContent?key={api_key}"
     
     # Encode image to base64
     image_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -69,7 +71,7 @@ def process_receipt(image_bytes):
     {
         "Merchant Name": "name of the merchant",
         "Date": "YYYY-MM-DD",
-        "Total Amount": number,
+        "Total Amount": 0.00,
         "Category": "Food" or "Transport" or "Supplies"
     }
     """
@@ -88,9 +90,7 @@ def process_receipt(image_bytes):
         }]
     }
     
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     
     response = requests.post(url, headers=headers, json=payload)
     
@@ -99,11 +99,10 @@ def process_receipt(image_bytes):
     
     result = response.json()
     
-    # Extract the text response
     try:
         text_response = result["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
-        raise Exception(f"Unexpected API response format: {result}")
+        raise Exception(f"Unexpected API response: {result}")
     
     # Clean the response
     clean_json = text_response.strip()
