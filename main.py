@@ -56,7 +56,7 @@ def process_receipt(image_bytes):
     
     # Use one of the available models from your list
     # Options: "models/gemini-2.0-flash", "models/gemini-2.5-flash", "models/gemini-2.0-flash-lite"
-    model_name = "models/gemini-2.0-flash"
+    model_name = "models/gemini-2.5-flash"
     
     url = f"https://generativelanguage.googleapis.com/v1/{model_name}:generateContent?key={api_key}"
     
