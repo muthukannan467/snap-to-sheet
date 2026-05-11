@@ -1,14 +1,13 @@
 import streamlit as st
 import json
 import gspread
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- UI CONFIG & CSS ---
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="Receipt OCR Scanner", page_icon="🧾")
 
-# Custom CSS for the green scanning bar animation
+# --- CUSTOM CSS FOR SCANNING ANIMATION ---
 st.markdown("""
     <style>
     @keyframes scan {
@@ -32,62 +31,76 @@ st.markdown("""
         z-index: 10;
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # --- INITIALIZATION ---
 def init_gemini():
-    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    """Initialize Gemini with API key from secrets"""
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    return genai
 
 def init_gspread():
-    # Use oauth2client instead of google.oauth2.service_account
+    """Initialize Google Sheets with Service Account from secrets"""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # Get the JSON from secrets and parse it
+    # Get the JSON from secrets
     gcp_json = st.secrets["gcp_service_account"]
     
-    # If it's a string, parse it; if it's already a dict, use it directly
+    # Parse if it's a string
     if isinstance(gcp_json, str):
         creds_dict = json.loads(gcp_json)
     else:
         creds_dict = gcp_json
     
-    # Create credentials using oauth2client
+    # Create credentials
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-client = init_gemini()
+# Initialize
+genai_client = init_gemini()
 gc = init_gspread()
 
-# --- PROCESSING LOGIC ---
+# --- PROCESSING FUNCTIONS ---
 def process_receipt(image_bytes):
-    prompt = """
-    Extract the following information from this receipt in raw JSON format:
-    - Merchant Name
-    - Date
-    - Total Amount (as a number)
-    - Category (must be one of: Food, Transport, Supplies)
+    """Send image to Gemini and extract receipt data"""
+    model = genai_client.GenerativeModel('gemini-1.5-flash')
     
-    Return ONLY the raw JSON object. No markdown formatting, no conversational text.
-    Example: {"Merchant Name": "Starbucks", "Date": "2023-10-01", "Total Amount": 5.50, "Category": "Food"}
+    prompt = """
+    Extract the following information from this receipt image.
+    Return ONLY valid JSON, no other text, no markdown formatting.
+    
+    JSON format:
+    {
+        "Merchant Name": "name of the merchant",
+        "Date": "YYYY-MM-DD",
+        "Total Amount": number,
+        "Category": "Food" or "Transport" or "Supplies"
+    }
     """
     
-    response = client.models.generate_content(
-        model="gemini-1.5-flash-latest",
-        contents=[
-            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            prompt
-        ],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        )
-    )
-    return json.loads(response.text)
+    response = model.generate_content([
+        prompt,
+        {"mime_type": "image/jpeg", "data": image_bytes}
+    ])
+    
+    # Clean the response (remove markdown code blocks if present)
+    clean_json = response.text.strip()
+    if clean_json.startswith("```json"):
+        clean_json = clean_json[7:]
+    if clean_json.startswith("```"):
+        clean_json = clean_json[3:]
+    if clean_json.endswith("```"):
+        clean_json = clean_json[:-3]
+    clean_json = clean_json.strip()
+    
+    return json.loads(clean_json)
 
 def save_to_sheets(data):
+    """Save extracted data to Google Sheet"""
     try:
         sh = gc.open('receipt_ocr')
         worksheet = sh.sheet1
-        # Append row: Merchant Name, Date, Total Amount, Category
+        
         row = [
             data.get("Merchant Name", ""),
             data.get("Date", ""),
@@ -102,30 +115,33 @@ def save_to_sheets(data):
 
 # --- APP UI ---
 st.title("🧾 Receipt OCR Scanner")
-st.write("Take a photo of your receipt to automatically log it.")
+st.write("Take a photo of your receipt to automatically log it to Google Sheets.")
 
-img_file = st.camera_input("Scan Receipt")
+img_file = st.camera_input("📸 Scan Receipt")
 
 if img_file:
-    # 1. Show Scanning Animation
+    # Show scanning animation
     scan_placeholder = st.empty()
     scan_placeholder.markdown('<div class="scanner-container"><div class="scanning-bar"></div></div>', unsafe_allow_html=True)
     
     with st.spinner("Gemini is analyzing the receipt..."):
         try:
-            # 2. Extract Data
+            # Extract data from receipt
             receipt_data = process_receipt(img_file.getvalue())
             
-            # 3. Save to Google Sheets
+            # Save to Google Sheets
             success = save_to_sheets(receipt_data)
             
             if success:
-                # 4. Cleanup and Success
+                # Remove animation
                 scan_placeholder.empty()
-                st.toast(f"Logged: {receipt_data.get('Merchant Name')} - ${receipt_data.get('Total Amount')}", icon='✅')
                 
-                # Show extracted data preview
-                st.success("Data successfully saved to 'receipt_ocr'!")
+                # Show success message
+                st.toast(f"✅ Logged: {receipt_data.get('Merchant Name')} - ${receipt_data.get('Total Amount')}", icon='✅')
+                st.success("Data successfully saved to 'receipt_ocr' Google Sheet!")
+                
+                # Show extracted data
+                st.subheader("📊 Extracted Data:")
                 st.json(receipt_data)
                 
         except Exception as e:
