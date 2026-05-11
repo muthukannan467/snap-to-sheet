@@ -3,7 +3,7 @@ import json
 import gspread
 from google import genai
 from google.genai import types
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 
 # --- UI CONFIG & CSS ---
 st.set_page_config(page_title="Receipt OCR Scanner", page_icon="🧾")
@@ -39,8 +39,20 @@ def init_gemini():
     return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 def init_gspread():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    # Use oauth2client instead of google.oauth2.service_account
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    # Get the JSON from secrets and parse it
+    gcp_json = st.secrets["gcp_service_account"]
+    
+    # If it's a string, parse it; if it's already a dict, use it directly
+    if isinstance(gcp_json, str):
+        creds_dict = json.loads(gcp_json)
+    else:
+        creds_dict = gcp_json
+    
+    # Create credentials using oauth2client
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 client = init_gemini()
@@ -60,7 +72,7 @@ def process_receipt(image_bytes):
     """
     
     response = client.models.generate_content(
-        model="gemini-2.0-flash", # or gemini-1.5-flash
+        model="gemini-1.5-flash",
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
             prompt
