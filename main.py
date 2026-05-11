@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import gspread
-import google.generativeai as genai
+import requests
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- PAGE CONFIG ---
@@ -34,11 +34,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INITIALIZATION ---
-def init_gemini():
-    """Initialize Gemini with API key from secrets"""
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    return genai
-
 def init_gspread():
     """Initialize Google Sheets with Service Account from secrets"""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -56,14 +51,15 @@ def init_gspread():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-# Initialize
-genai_client = init_gemini()
-gc = init_gspread()
-
-# --- PROCESSING FUNCTIONS ---
 def process_receipt(image_bytes):
-    """Send image to Gemini and extract receipt data"""
-    model = genai_client.GenerativeModel('gemini-1.5-flash')
+    """Send image to Gemini API directly using requests"""
+    
+    api_key = st.secrets["GEMINI_API_KEY"]
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+    
+    # Encode image to base64
+    import base64
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = """
     Extract the following information from this receipt image.
@@ -78,13 +74,42 @@ def process_receipt(image_bytes):
     }
     """
     
-    response = model.generate_content([
-        prompt,
-        {"mime_type": "image/jpeg", "data": image_bytes}
-    ])
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image_base64
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "response_mime_type": "application/json"
+        }
+    }
     
-    # Clean the response (remove markdown code blocks if present)
-    clean_json = response.text.strip()
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code != 200:
+        raise Exception(f"API Error: {response.status_code} - {response.text}")
+    
+    result = response.json()
+    
+    # Extract the text response
+    try:
+        text_response = result["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        raise Exception(f"Unexpected API response format: {result}")
+    
+    # Clean the response
+    clean_json = text_response.strip()
     if clean_json.startswith("```json"):
         clean_json = clean_json[7:]
     if clean_json.startswith("```"):
@@ -112,6 +137,9 @@ def save_to_sheets(data):
     except Exception as e:
         st.error(f"Error saving to Google Sheets: {e}")
         return False
+
+# Initialize
+gc = init_gspread()
 
 # --- APP UI ---
 st.title("🧾 Receipt OCR Scanner")
